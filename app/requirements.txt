@@ -1,0 +1,5 @@
+gradio>=4.0.0
+torch
+transformers>=5.1.0
+accelerate
+pillow

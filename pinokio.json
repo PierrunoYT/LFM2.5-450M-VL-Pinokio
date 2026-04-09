@@ -1,0 +1,5 @@
+{
+  "title": "VoxCPM 2",
+  "description": "Tokenizer-free TTS for context-aware speech, voice cloning, and voice design. 2B params, 48kHz, 30 languages (Gradio UI).",
+  "icon": "icon.jpeg"
+}

@@ -1,12 +1,12 @@
 # LFM2.5-VL-450M (Pinokio)
 
-[Pinokio](https://pinokio.computer/) launcher and **Gradio** front-end for **[LiquidAI/LFM2.5-VL-450M](https://huggingface.co/LiquidAI/LFM2.5-VL-450M)** — a compact **vision–language** model for image understanding. The app loads the model with **Hugging Face Transformers** (`AutoModelForImageTextToText` + `AutoProcessor`), uses **Accelerate** `device_map="auto"`, and prefers **bfloat16** on CUDA.
+[Pinokio](https://pinokio.computer/) launcher and **Gradio** front-end for **[LiquidAI/LFM2.5-VL-450M](https://huggingface.co/LiquidAI/LFM2.5-VL-450M)** — a compact **image**-language model by Liquid AI. The app loads the model with **Hugging Face Transformers** (`AutoModelForImageTextToText` + `AutoProcessor`), uses **Accelerate** `device_map="auto"`, and prefers **bfloat16** on CUDA.
 
 ## Features
 
 - **Vision chat**: Upload an image (or paste an **image URL**), enter a text prompt, and generate a response.
-- **Video**: Upload a video file; the app samples evenly spaced frames and sends them to the model as multiple images in order (same idea as Liquid’s WebGPU video-captioning demo). Use **Max frames from video** to limit VRAM and runtime.
-- **Advanced generation**: Optional sliders for `max_new_tokens`, `temperature`, `min_p`, and `repetition_penalty` (see **Advanced Generation Settings** in the UI).
+- **Video (frame sampling)**: The model has no native video support — it is an image-language model. Video input is handled by evenly sampling frames and feeding them as individual images, which matches how Liquid's own WebGPU demo works. Choose **combined** (all frames in one prompt) or **stream per frame** (one generation per frame, output updates live). Use **Max frames from video** to control VRAM usage and runtime.
+- **Advanced generation**: Optional sliders for `max_new_tokens`, `temperature`, `min_p`, and `repetition_penalty` (see **Advanced generation settings** in the UI).
 - **Local Gradio UI**: Runs on `127.0.0.1` by default; exposes the usual Gradio **REST API** and `/docs` when the server is up.
 
 ## Requirements

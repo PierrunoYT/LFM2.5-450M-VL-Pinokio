@@ -1,7 +1,7 @@
 module.exports = {
   version: "5.0",
   title: "LFM2.5-450M-VL",
-  description: "LFM2.5-VL-450M (Liquid AI): compact vision–language model for image and video understanding. Gradio UI: upload a video or image (or image URL), write a prompt, and generate text. Video mode samples frames and can stream one model reply per frame live as each finishes. Optional sliders for max_new_tokens, temperature, min_p, and repetition_penalty.",
+  description: "LFM2.5-VL-450M (Liquid AI): compact image-language model (no native video support). Upload an image or image URL and run vision chat. Video is supported by sampling frames and feeding them as images — choose one combined answer or stream one reply per frame. Optional sliders for max_new_tokens, temperature, min_p, and repetition_penalty.",
   icon: "icon.jpeg",
   menu: async (kernel, info) => {
     let installed = info.exists("env")

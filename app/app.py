@@ -273,10 +273,12 @@ with gr.Blocks(title="LFM2.5-VL-450M") as demo:
     gr.Markdown(
         """
         # LFM2.5-VL-450M
-        Compact multimodal model by Liquid AI for image and video understanding.
-        Upload a **video** or an **image** (or paste an image URL), type a prompt, and click **Run**.
-        For video you can choose a **single combined answer** or **stream one reply per sampled frame**
-        so output appears live as each frame is processed.
+        Compact **image**-language model by Liquid AI. It does not have native video support —
+        video is handled by evenly sampling frames and feeding them as individual images.
+
+        Upload a **video** (frames will be sampled) or an **image** (or paste an image URL), type a prompt, and click **Run**.
+        For video: **combined** sends all frames in one prompt; **stream per frame** runs one generation
+        per frame and updates the output live as each finishes.
         """
     )
 

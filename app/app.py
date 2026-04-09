@@ -1,8 +1,11 @@
 import os
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
+import cv2
 import gradio as gr
+import numpy as np
 import torch
+from PIL import Image
 from transformers import AutoModelForImageTextToText, AutoProcessor
 from transformers.image_utils import load_image
 
@@ -41,7 +44,65 @@ def load_models() -> None:
     print("Model and processor loaded.")
 
 
-def _resolve_image(image_path: Optional[str], image_url: str):
+def _sample_video_frames(video_path: str, max_frames: int) -> List[Image.Image]:
+    """Evenly sample up to max_frames from a video (RGB PIL images)."""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frames_out: List[Image.Image] = []
+
+    try:
+        if max_frames < 1:
+            raise ValueError("max_frames must be at least 1.")
+
+        if total <= 0:
+            while len(frames_out) < max_frames:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                frames_out.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            if not frames_out:
+                raise ValueError("No frames could be read from the video.")
+            if len(frames_out) > max_frames:
+                idxs = np.linspace(0, len(frames_out) - 1, max_frames, dtype=int)
+                frames_out = [frames_out[int(i)] for i in idxs]
+            return frames_out
+
+        n_take = min(max_frames, total)
+        indices = np.unique(np.linspace(0, total - 1, n_take, dtype=int))
+        needed = set(indices.tolist())
+        seen = 0
+        while seen < total and len(frames_out) < len(indices):
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if seen in needed:
+                frames_out.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            seen += 1
+
+        if not frames_out:
+            raise ValueError("No frames could be read from the video.")
+        return frames_out
+    finally:
+        cap.release()
+
+
+def _video_filepath(val: object) -> Optional[str]:
+    if val is None:
+        return None
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    if isinstance(val, dict):
+        for key in ("name", "path", "video"):
+            v = val.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return None
+
+
+def _resolve_image(image_path: Optional[str], image_url: str) -> Image.Image:
     if image_path:
         return load_image(image_path)
     if image_url and image_url.strip():
@@ -50,6 +111,8 @@ def _resolve_image(image_path: Optional[str], image_url: str):
 
 
 def run_vision_chat(
+    video_path: Optional[str],
+    max_video_frames: int,
     image_path: Optional[str],
     image_url: str,
     prompt: str,
@@ -64,7 +127,31 @@ def run_vision_chat(
         return "", "Please provide a text prompt."
 
     try:
-        image = _resolve_image(image_path, image_url)
+        images: List[Image.Image] = []
+        mode_note = ""
+
+        video_file = _video_filepath(video_path)
+        if video_file:
+            images = _sample_video_frames(video_file, int(max_video_frames))
+            mode_note = f"Using {len(images)} sampled video frame(s)."
+        elif image_path or (image_url and image_url.strip()):
+            images = [_resolve_image(image_path, image_url)]
+            mode_note = "Using a single image."
+        else:
+            return "", "Provide a video file, an image upload, or an image URL."
+
+        user_text = prompt.strip()
+        if video_file and len(images) > 1:
+            user_text = (
+                "These images are frames from one video in chronological order. "
+                + user_text
+            )
+
+        content: List[dict] = []
+        for im in images:
+            content.append({"type": "image", "image": im})
+        content.append({"type": "text", "text": user_text})
+
         conversation = [
             {
                 "role": "system",
@@ -77,10 +164,7 @@ def run_vision_chat(
             },
             {
                 "role": "user",
-                "content": [
-                    {"type": "image", "image": image},
-                    {"type": "text", "text": prompt.strip()},
-                ],
+                "content": content,
             },
         ]
 
@@ -103,12 +187,11 @@ def run_vision_chat(
         try:
             outputs = model.generate(**inputs, **generate_kwargs)
         except TypeError:
-            # Some versions may not support min_p.
             generate_kwargs.pop("min_p", None)
             outputs = model.generate(**inputs, **generate_kwargs)
 
         decoded = processor.batch_decode(outputs, skip_special_tokens=True)[0].strip()
-        return decoded, "Done."
+        return decoded, f"Done. {mode_note}"
     except Exception as exc:
         return "", f"Error: {exc}"
 
@@ -128,21 +211,33 @@ with gr.Blocks(
     gr.Markdown(
         """
         # LFM2.5-VL-450M
-        Compact multimodal model by Liquid AI for fast image understanding.
-        Upload an image (or provide an image URL), ask a question, and generate a response.
+        Compact multimodal model by Liquid AI for image and video understanding.
+        Upload **video** or an **image** (or image URL), ask a question, and generate a response.
+        Video uses evenly spaced frames as multiple images (same pathway as Liquid’s streaming demos).
         """
     )
 
     with gr.Row():
         with gr.Column():
+            video_input = gr.Video(
+                label="Video upload (optional)",
+                sources=["upload"],
+            )
+            max_video_frames_input = gr.Slider(
+                minimum=2,
+                maximum=24,
+                value=8,
+                step=1,
+                label="Max frames from video",
+            )
             image_input = gr.Image(
                 type="filepath",
-                label="Image Upload",
+                label="Image upload (if no video)",
                 sources=["upload", "clipboard"],
             )
             image_url_input = gr.Textbox(
                 value="",
-                label="Image URL (optional)",
+                label="Image URL (if no video or image file)",
                 placeholder="https://example.com/image.jpg",
             )
             prompt_input = gr.Textbox(
@@ -189,6 +284,8 @@ with gr.Blocks(
     run_button.click(
         fn=run_vision_chat,
         inputs=[
+            video_input,
+            max_video_frames_input,
             image_input,
             image_url_input,
             prompt_input,

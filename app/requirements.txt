@@ -3,3 +3,5 @@ torch
 transformers>=5.1.0
 accelerate
 pillow
+opencv-python-headless
+numpy

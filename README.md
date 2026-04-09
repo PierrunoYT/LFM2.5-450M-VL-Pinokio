@@ -5,6 +5,7 @@
 ## Features
 
 - **Vision chat**: Upload an image (or paste an **image URL**), enter a text prompt, and generate a response.
+- **Video**: Upload a video file; the app samples evenly spaced frames and sends them to the model as multiple images in order (same idea as Liquid’s WebGPU video-captioning demo). Use **Max frames from video** to limit VRAM and runtime.
 - **Advanced generation**: Optional sliders for `max_new_tokens`, `temperature`, `min_p`, and `repetition_penalty` (see **Advanced Generation Settings** in the UI).
 - **Local Gradio UI**: Runs on `127.0.0.1` by default; exposes the usual Gradio **REST API** and `/docs` when the server is up.
 

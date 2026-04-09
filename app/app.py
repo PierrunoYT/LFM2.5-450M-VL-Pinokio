@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Tuple
+from typing import Generator, List, Optional, Tuple
 
 import cv2
 import gradio as gr
@@ -16,10 +16,13 @@ model = None
 processor = None
 
 
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
+
+
 def _model_dtype() -> torch.dtype:
-    if torch.cuda.is_available():
-        return torch.bfloat16
-    return torch.float32
+    return torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
 
 def load_models() -> None:
@@ -44,52 +47,58 @@ def load_models() -> None:
     print("Model and processor loaded.")
 
 
+# ---------------------------------------------------------------------------
+# Video utilities
+# ---------------------------------------------------------------------------
+
+
 def _sample_video_frames(video_path: str, max_frames: int) -> List[Image.Image]:
-    """Evenly sample up to max_frames from a video (RGB PIL images)."""
+    """Evenly sample up to *max_frames* RGB PIL images from a video file."""
+    if max_frames < 1:
+        raise ValueError("max_frames must be at least 1.")
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open video: {video_path}")
 
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frames_out: List[Image.Image] = []
-
     try:
-        if max_frames < 1:
-            raise ValueError("max_frames must be at least 1.")
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frames: List[Image.Image] = []
 
         if total <= 0:
-            while len(frames_out) < max_frames:
+            # Unknown length — read all frames then subsample.
+            while True:
                 ok, frame = cap.read()
                 if not ok:
                     break
-                frames_out.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            if not frames_out:
+                frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            if not frames:
                 raise ValueError("No frames could be read from the video.")
-            if len(frames_out) > max_frames:
-                idxs = np.linspace(0, len(frames_out) - 1, max_frames, dtype=int)
-                frames_out = [frames_out[int(i)] for i in idxs]
-            return frames_out
+            if len(frames) > max_frames:
+                idxs = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
+                frames = [frames[int(i)] for i in idxs]
+            return frames
 
         n_take = min(max_frames, total)
-        indices = np.unique(np.linspace(0, total - 1, n_take, dtype=int))
-        needed = set(indices.tolist())
-        seen = 0
-        while seen < total and len(frames_out) < len(indices):
+        indices = set(np.unique(np.linspace(0, total - 1, n_take, dtype=int)).tolist())
+        for pos in range(total):
             ok, frame = cap.read()
             if not ok:
                 break
-            if seen in needed:
-                frames_out.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            seen += 1
+            if pos in indices:
+                frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            if len(frames) == n_take:
+                break
 
-        if not frames_out:
+        if not frames:
             raise ValueError("No frames could be read from the video.")
-        return frames_out
+        return frames
     finally:
         cap.release()
 
 
 def _video_filepath(val: object) -> Optional[str]:
+    """Extract a file path string from whatever Gradio passes for a video component."""
     if val is None:
         return None
     if isinstance(val, str) and val.strip():
@@ -102,6 +111,11 @@ def _video_filepath(val: object) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Image utilities
+# ---------------------------------------------------------------------------
+
+
 def _resolve_image(image_path: Optional[str], image_url: str) -> Image.Image:
     if image_path:
         return load_image(image_path)
@@ -110,125 +124,176 @@ def _resolve_image(image_path: Optional[str], image_url: str) -> Image.Image:
     raise ValueError("Provide an uploaded image or a valid image URL.")
 
 
+# ---------------------------------------------------------------------------
+# Inference
+# ---------------------------------------------------------------------------
+
+
+def _build_conversation(images: List[Image.Image], user_text: str) -> list:
+    content: List[dict] = [{"type": "image", "image": im} for im in images]
+    content.append({"type": "text", "text": user_text})
+    return [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "You are a helpful multimodal assistant by Liquid AI.",
+                }
+            ],
+        },
+        {"role": "user", "content": content},
+    ]
+
+
+def _generate_reply(
+    images: List[Image.Image],
+    user_text: str,
+    max_new_tokens: int,
+    temperature: float,
+    min_p: float,
+    repetition_penalty: float,
+) -> str:
+    assert model is not None and processor is not None
+
+    conversation = _build_conversation(images, user_text)
+    inputs = processor.apply_chat_template(
+        conversation,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        return_dict=True,
+        tokenize=True,
+    ).to(model.device)
+
+    generate_kwargs = {
+        "max_new_tokens": int(max_new_tokens),
+        "do_sample": temperature > 0.0,
+        "temperature": float(temperature),
+        "min_p": float(min_p),
+        "repetition_penalty": float(repetition_penalty),
+    }
+
+    input_len = inputs["input_ids"].shape[-1]
+    try:
+        outputs = model.generate(**inputs, **generate_kwargs)
+    except TypeError:
+        # Older transformers versions may not support min_p.
+        generate_kwargs.pop("min_p", None)
+        outputs = model.generate(**inputs, **generate_kwargs)
+
+    return processor.batch_decode(outputs[:, input_len:], skip_special_tokens=True)[
+        0
+    ].strip()
+
+
+# ---------------------------------------------------------------------------
+# Main chat handler (streaming generator)
+# ---------------------------------------------------------------------------
+
+
 def run_vision_chat(
     video_path: Optional[str],
     max_video_frames: int,
     image_path: Optional[str],
     image_url: str,
     prompt: str,
+    stream_each_frame: bool,
     max_new_tokens: int,
     temperature: float,
     min_p: float,
     repetition_penalty: float,
-) -> Tuple[str, str]:
+) -> Generator[Tuple[str, str], None, None]:
     if model is None or processor is None:
-        return "", "Model is not loaded yet."
+        yield "", "Model is not loaded yet."
+        return
     if not prompt or not prompt.strip():
-        return "", "Please provide a text prompt."
+        yield "", "Please provide a text prompt."
+        return
+
+    gen_args = (max_new_tokens, temperature, min_p, repetition_penalty)
 
     try:
-        images: List[Image.Image] = []
-        mode_note = ""
-
         video_file = _video_filepath(video_path)
+
+        # --- Video input ---
         if video_file:
             images = _sample_video_frames(video_file, int(max_video_frames))
-            mode_note = f"Using {len(images)} sampled video frame(s)."
-        elif image_path or (image_url and image_url.strip()):
-            images = [_resolve_image(image_path, image_url)]
-            mode_note = "Using a single image."
-        else:
-            return "", "Provide a video file, an image upload, or an image URL."
+            n = len(images)
+            base_prompt = prompt.strip()
 
-        user_text = prompt.strip()
-        if video_file and len(images) > 1:
-            user_text = (
-                "These images are frames from one video in chronological order. "
-                + user_text
-            )
+            if stream_each_frame:
+                # Analyse each frame independently and stream results live.
+                accumulated = ""
+                for i, frame in enumerate(images):
+                    frame_prompt = (
+                        f"This is frame {i + 1} of {n} from the same video "
+                        f"(chronological order). {base_prompt}"
+                    )
+                    reply = _generate_reply([frame], frame_prompt, *gen_args)
+                    accumulated += f"### Frame {i + 1} / {n}\n{reply}\n\n"
+                    yield accumulated, f"Streamed frame {i + 1} / {n}."
+                return
 
-        content: List[dict] = []
-        for im in images:
-            content.append({"type": "image", "image": im})
-        content.append({"type": "text", "text": user_text})
+            # All frames in a single prompt.
+            user_text = base_prompt
+            if n > 1:
+                user_text = (
+                    "These images are frames from one video in chronological order. "
+                    + user_text
+                )
+            reply = _generate_reply(images, user_text, *gen_args)
+            yield reply, f"Done. One answer from {n} frame(s) in a single prompt."
+            return
 
-        conversation = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "You are a helpful multimodal assistant by Liquid AI.",
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": content,
-            },
-        ]
+        # --- Image input ---
+        if image_path or (image_url and image_url.strip()):
+            image = _resolve_image(image_path, image_url)
+            reply = _generate_reply([image], prompt.strip(), *gen_args)
+            yield reply, "Done. Single image."
+            return
 
-        inputs = processor.apply_chat_template(
-            conversation,
-            add_generation_prompt=True,
-            return_tensors="pt",
-            return_dict=True,
-            tokenize=True,
-        ).to(model.device)
+        yield "", "Provide a video file, an image upload, or an image URL."
 
-        generate_kwargs = {
-            "max_new_tokens": int(max_new_tokens),
-            "do_sample": temperature > 0.0,
-            "temperature": float(temperature),
-            "min_p": float(min_p),
-            "repetition_penalty": float(repetition_penalty),
-        }
-
-        try:
-            outputs = model.generate(**inputs, **generate_kwargs)
-        except TypeError:
-            generate_kwargs.pop("min_p", None)
-            outputs = model.generate(**inputs, **generate_kwargs)
-
-        decoded = processor.batch_decode(outputs, skip_special_tokens=True)[0].strip()
-        return decoded, f"Done. {mode_note}"
     except Exception as exc:
-        return "", f"Error: {exc}"
+        yield "", f"Error: {exc}"
 
 
-_APP_THEME = gr.themes.Soft(
+# ---------------------------------------------------------------------------
+# Gradio UI
+# ---------------------------------------------------------------------------
+
+_THEME = gr.themes.Soft(
     primary_hue="blue",
     secondary_hue="gray",
     neutral_hue="slate",
     font=[gr.themes.GoogleFont("Inter"), "Arial", "sans-serif"],
 )
 
-
-with gr.Blocks(
-    title="LFM2.5-VL-450M",
-    theme=_APP_THEME,
-) as demo:
+with gr.Blocks(title="LFM2.5-VL-450M", theme=_THEME) as demo:
     gr.Markdown(
         """
         # LFM2.5-VL-450M
         Compact multimodal model by Liquid AI for image and video understanding.
-        Upload **video** or an **image** (or image URL), ask a question, and generate a response.
-        Video uses evenly spaced frames as multiple images (same pathway as Liquid’s streaming demos).
+        Upload a **video** or an **image** (or paste an image URL), type a prompt, and click **Run**.
+        For video you can choose a **single combined answer** or **stream one reply per sampled frame**
+        so output appears live as each frame is processed.
         """
     )
 
     with gr.Row():
+        # ---- Left column: inputs ----
         with gr.Column():
-            video_input = gr.Video(
-                label="Video upload (optional)",
-                sources=["upload"],
-            )
+            video_input = gr.Video(label="Video upload (optional)", sources=["upload"])
             max_video_frames_input = gr.Slider(
-                minimum=2,
+                minimum=1,
                 maximum=24,
                 value=8,
                 step=1,
                 label="Max frames from video",
+            )
+            stream_frames_input = gr.Checkbox(
+                label="Stream output per frame (one generation per frame; ignored for images)",
+                value=False,
             )
             image_input = gr.Image(
                 type="filepath",
@@ -245,7 +310,7 @@ with gr.Blocks(
                 label="Prompt",
                 lines=3,
             )
-            with gr.Accordion("Advanced Generation Settings", open=False):
+            with gr.Accordion("Advanced generation settings", open=False):
                 max_new_tokens_input = gr.Slider(
                     minimum=16,
                     maximum=1024,
@@ -274,11 +339,11 @@ with gr.Blocks(
                     step=0.01,
                     label="repetition_penalty",
                 )
-
             run_button = gr.Button("Run Vision Chat", variant="primary")
 
+        # ---- Right column: outputs ----
         with gr.Column():
-            output_text = gr.Textbox(label="Model Output", lines=14)
+            output_text = gr.Textbox(label="Model output", lines=14)
             status_text = gr.Textbox(label="Status", lines=2)
 
     run_button.click(
@@ -289,6 +354,7 @@ with gr.Blocks(
             image_input,
             image_url_input,
             prompt_input,
+            stream_frames_input,
             max_new_tokens_input,
             temperature_input,
             min_p_input,
@@ -296,27 +362,35 @@ with gr.Blocks(
         ],
         outputs=[output_text, status_text],
         show_progress=True,
+        stream=True,
         api_name="generate",
     )
 
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     load_models()
 
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
-    favicon = None
-    for candidate in (
-        os.path.join(here, "icon.png"),
-        os.path.join(here, "icon.jpeg"),
-        os.path.join(here, "icon.jpg"),
-        os.path.join(root, "icon.jpeg"),
-        os.path.join(root, "icon.jpg"),
-        os.path.join(root, "icon.png"),
-    ):
-        if os.path.isfile(candidate):
-            favicon = candidate
-            break
+    favicon = next(
+        (
+            p
+            for p in (
+                os.path.join(here, "icon.png"),
+                os.path.join(here, "icon.jpeg"),
+                os.path.join(here, "icon.jpg"),
+                os.path.join(root, "icon.png"),
+                os.path.join(root, "icon.jpeg"),
+                os.path.join(root, "icon.jpg"),
+            )
+            if os.path.isfile(p)
+        ),
+        None,
+    )
 
     demo.queue(max_size=16, default_concurrency_limit=1).launch(
         server_name="127.0.0.1",

@@ -15,7 +15,7 @@
 - **GPU**: Strongly recommended (NVIDIA with CUDA). CPU fallback uses `float32` and is much slower.
 - **RAM / VRAM**: Depends on Transformers + model weights; allow several GB free.
 - **Disk**: Model weights download from Hugging Face on first load unless already cached.
-- **Gradio**: `>=5.0.0,<7` — tested against **6.11.0**. Gradio 5+ is required for generator-based streaming (incremental `yield` updates in the UI). Gradio 7 is not yet tested and is excluded to prevent silent API breakage.
+- **Gradio**: `>=6.0.0,<7` — tested against **6.11.0**. Gradio 6 is required for `launch(theme=...)` support and generator-based streaming (incremental `yield` updates in the UI). Gradio 7 is not yet tested and is excluded to prevent silent API breakage.
 
 ## Repository layout
 

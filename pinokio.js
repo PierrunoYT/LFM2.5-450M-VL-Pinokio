@@ -1,7 +1,7 @@
 module.exports = {
   version: "5.0",
-  title: "VoxCPM 2",
-  description: "🎙️ Tokenizer-Free TTS for Context-Aware Speech Generation, Voice Cloning & Voice Design. 2B params, 48kHz output, 30 languages. Built on MiniCPM-4 backbone for highly expressive, natural speech synthesis.",
+  title: "LFM2.5-450M-VL",
+  description: "LFM2.5-VL-450M (Liquid AI): compact vision–language model for image understanding. Gradio UI: upload an image or use an image URL, write a prompt, and generate text with Transformers (device_map auto, bf16 on CUDA). Optional sliders for max_new_tokens, temperature, min_p, and repetition_penalty.",
   icon: "icon.jpeg",
   menu: async (kernel, info) => {
     let installed = info.exists("env")

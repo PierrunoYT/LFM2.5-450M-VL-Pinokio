@@ -1,5 +1,5 @@
 {
-  "title": "VoxCPM 2",
-  "description": "Tokenizer-free TTS for context-aware speech, voice cloning, and voice design. 2B params, 48kHz, 30 languages (Gradio UI).",
+  "title": "LFM2.5-450M-VL",
+  "description": "LFM2.5-VL-450M (Liquid AI): compact vision–language model for image understanding. Gradio UI with upload/URL, prompt, and generation sliders.",
   "icon": "icon.jpeg"
 }

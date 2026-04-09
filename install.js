@@ -20,27 +20,9 @@ module.exports = {
       }
     },
     {
-      method: "shell.run",
-      params: {
-        venv: "env",
-        message: [
-          "hf download openbmb/VoxCPM2"
-        ],
-      }
-    },
-    {
-      method: "shell.run",
-      params: {
-        venv: "env",
-        message: [
-          "python -c \"from modelscope import snapshot_download; snapshot_download('iic/speech_zipenhancer_ans_multiloss_16k_base'); snapshot_download('iic/SenseVoiceSmall')\""
-        ],
-      }
-    },
-    {
       method: "notify",
       params: {
-        html: "Installation complete! Click 'Start' to launch VoxCPM 2."
+        html: "Installation complete! Click 'Start' to launch LFM2.5-VL-450M (Gradio). The model downloads from Hugging Face on first run."
       }
     }
   ]

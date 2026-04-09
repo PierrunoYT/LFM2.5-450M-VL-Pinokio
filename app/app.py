@@ -269,7 +269,7 @@ _THEME = gr.themes.Soft(
     font=[gr.themes.GoogleFont("Inter"), "Arial", "sans-serif"],
 )
 
-with gr.Blocks(title="LFM2.5-VL-450M", theme=_THEME) as demo:
+with gr.Blocks(title="LFM2.5-VL-450M") as demo:
     gr.Markdown(
         """
         # LFM2.5-VL-450M
@@ -362,7 +362,6 @@ with gr.Blocks(title="LFM2.5-VL-450M", theme=_THEME) as demo:
         ],
         outputs=[output_text, status_text],
         show_progress=True,
-        stream=True,
         api_name="generate",
     )
 
@@ -397,4 +396,5 @@ if __name__ == "__main__":
         share=False,
         show_error=True,
         favicon_path=favicon,
+        theme=_THEME,
     )

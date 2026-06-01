@@ -10,7 +10,7 @@ module.exports = {
           "python app/app.py"
         ],
         on: [{
-          "event": "/http:\/\/\\S+/",
+          "event": "/(http:\\/\\/\\S+)/",
           "done": true
         }]
       }
@@ -18,7 +18,7 @@ module.exports = {
     {
       method: "local.set",
       params: {
-        url: "{{input.event[0]}}"
+        url: "{{input.event[1]}}"
       }
     }
   ]

@@ -38,7 +38,7 @@ def load_models() -> None:
     image_processor = getattr(processor, "image_processor", None)
     if image_processor is not None:
         if hasattr(image_processor, "min_image_tokens"):
-            image_processor.min_image_tokens = 64
+            image_processor.min_image_tokens = 32
         if hasattr(image_processor, "max_image_tokens"):
             image_processor.max_image_tokens = 256
         if hasattr(image_processor, "do_image_splitting"):
@@ -87,7 +87,7 @@ def _sample_video_frames(video_path: str, max_frames: int) -> List[Image.Image]:
                 break
             if pos in indices:
                 frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            if len(frames) == n_take:
+            if len(frames) == len(indices):
                 break
 
         if not frames:
@@ -165,13 +165,15 @@ def _generate_reply(
         tokenize=True,
     ).to(model.device)
 
+    do_sample = temperature > 0.0
     generate_kwargs = {
         "max_new_tokens": int(max_new_tokens),
-        "do_sample": temperature > 0.0,
-        "temperature": float(temperature),
-        "min_p": float(min_p),
+        "do_sample": do_sample,
         "repetition_penalty": float(repetition_penalty),
     }
+    if do_sample:
+        generate_kwargs["temperature"] = float(temperature)
+        generate_kwargs["min_p"] = float(min_p)
 
     input_len = inputs["input_ids"].shape[-1]
     try:

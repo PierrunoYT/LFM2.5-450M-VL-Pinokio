@@ -52,6 +52,60 @@ def load_models() -> None:
 # ---------------------------------------------------------------------------
 
 
+# Videos at or below this many frames are decoded front to back: that is exact
+# and still cheap. Longer videos are sampled by seeking instead.
+_SEQUENTIAL_SCAN_LIMIT = 600
+
+
+def _to_pil(frame: np.ndarray) -> Image.Image:
+    return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+
+def _even_indices(total: int, max_frames: int) -> List[int]:
+    """Evenly spaced frame indices in [0, total - 1], rounded rather than truncated."""
+    n_take = min(max_frames, total)
+    return np.unique(np.linspace(0, total - 1, n_take).round().astype(int)).tolist()
+
+
+def _sample_by_seek(cap: "cv2.VideoCapture", indices: List[int]) -> List[Image.Image]:
+    """Grab specific frames by seeking. Returns [] if seeking is not reliable here."""
+    frames: List[Image.Image] = []
+    for idx in indices:
+        if not cap.set(cv2.CAP_PROP_POS_FRAMES, float(idx)):
+            return []
+        ok, frame = cap.read()
+        if not ok:
+            return []
+        frames.append(_to_pil(frame))
+    return frames
+
+
+def _sample_sequentially(
+    cap: "cv2.VideoCapture", indices: Optional[List[int]], max_frames: int
+) -> List[Image.Image]:
+    """Decode the stream front to back, keeping the wanted positions.
+
+    Used when the container reports no frame count, or when seeking misbehaves.
+    """
+    wanted = set(indices) if indices else None
+    frames: List[Image.Image] = []
+    pos = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if wanted is None or pos in wanted:
+            frames.append(_to_pil(frame))
+        pos += 1
+        if wanted is not None and len(frames) == len(wanted):
+            break
+
+    if wanted is None and len(frames) > max_frames:
+        # Length was unknown up front, so subsample after the fact.
+        frames = [frames[i] for i in _even_indices(len(frames), max_frames)]
+    return frames
+
+
 def _sample_video_frames(video_path: str, max_frames: int) -> List[Image.Image]:
     """Evenly sample up to *max_frames* RGB PIL images from a video file."""
     if max_frames < 1:
@@ -63,32 +117,28 @@ def _sample_video_frames(video_path: str, max_frames: int) -> List[Image.Image]:
 
     try:
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        indices = _even_indices(total, max_frames) if total > 0 else None
+
         frames: List[Image.Image] = []
+        if indices is not None and total > _SEQUENTIAL_SCAN_LIMIT:
+            # Long video: seek straight to the frames we want. The evenly spaced
+            # set always ends at total - 1, so a front-to-back decode would walk
+            # the entire file just to collect a handful of frames.
+            #
+            # OpenCV's frame seek is approximate on inter-frame codecs, so a
+            # frame may land a little off its exact index. That is fine here --
+            # the frames are only a temporal sample of the video -- but it is
+            # why short videos below the limit take the exact linear path.
+            frames = _sample_by_seek(cap, indices)
 
-        if total <= 0:
-            # Unknown length — read all frames then subsample.
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            if not frames:
-                raise ValueError("No frames could be read from the video.")
-            if len(frames) > max_frames:
-                idxs = np.linspace(0, len(frames) - 1, max_frames, dtype=int)
-                frames = [frames[int(i)] for i in idxs]
-            return frames
-
-        n_take = min(max_frames, total)
-        indices = set(np.unique(np.linspace(0, total - 1, n_take, dtype=int)).tolist())
-        for pos in range(total):
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if pos in indices:
-                frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            if len(frames) == len(indices):
-                break
+        if not frames:
+            # Seeking failed or the length is unknown. Reopen so a half-failed
+            # seek cannot leave the decoder mid-stream, then scan linearly.
+            cap.release()
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise ValueError(f"Could not reopen video: {video_path}")
+            frames = _sample_sequentially(cap, indices, max_frames)
 
         if not frames:
             raise ValueError("No frames could be read from the video.")

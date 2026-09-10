@@ -228,9 +228,13 @@ def _generate_reply(
     input_len = inputs["input_ids"].shape[-1]
     try:
         outputs = model.generate(**inputs, **generate_kwargs)
-    except TypeError:
-        # Older transformers versions may not support min_p.
-        generate_kwargs.pop("min_p", None)
+    except (TypeError, ValueError) as exc:
+        # Older transformers versions do not accept min_p. Only retry when that
+        # is actually what was rejected, so an unrelated failure surfaces as
+        # itself instead of through a second, more confusing error.
+        if "min_p" not in generate_kwargs or "min_p" not in str(exc):
+            raise
+        generate_kwargs.pop("min_p")
         outputs = model.generate(**inputs, **generate_kwargs)
 
     return processor.batch_decode(outputs[:, input_len:], skip_special_tokens=True)[
@@ -263,6 +267,9 @@ def run_vision_chat(
         return
 
     gen_args = (max_new_tokens, temperature, min_p, repetition_penalty)
+    # Whatever has already been streamed to the UI, so a failure partway through
+    # a multi-frame run reports the error without wiping the earlier answers.
+    partial = ""
 
     try:
         video_file = _video_filepath(video_path)
@@ -283,6 +290,7 @@ def run_vision_chat(
                     )
                     reply = _generate_reply([frame], frame_prompt, *gen_args)
                     accumulated += f"### Frame {i + 1} / {n}\n{reply}\n\n"
+                    partial = accumulated
                     yield accumulated, f"Streamed frame {i + 1} / {n}."
                 return
 
@@ -307,7 +315,7 @@ def run_vision_chat(
         yield "", "Provide a video file, an image upload, or an image URL."
 
     except Exception as exc:
-        yield "", f"Error: {exc}"
+        yield partial, f"Error: {exc}"
 
 
 # ---------------------------------------------------------------------------

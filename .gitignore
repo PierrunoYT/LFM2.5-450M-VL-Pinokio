@@ -31,6 +31,14 @@ env.bak/
 venv.bak/
 .venv/
 
+# Linter / tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Open Edit managed runtime clone
+.open-edit/
+
 # PyCharm
 .idea/
 

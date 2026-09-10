@@ -4,5 +4,10 @@ module.exports = {
     params: {
       path: "env"
     }
+  }, {
+    method: "fs.rm",
+    params: {
+      path: "app/__pycache__"
+    }
   }]
 }

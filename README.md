@@ -12,7 +12,8 @@
 ## Requirements
 
 - **Python**: 3.10+ recommended (Pinokio `torch.js` wheels target **CPython 3.10** on some platforms).
-- **GPU**: Strongly recommended (NVIDIA with CUDA). CPU fallback uses `float32` and is much slower.
+- **GPU**: Strongly recommended (NVIDIA with CUDA). CPU fallback uses `float32` and is much slower. AMD GPUs on Windows run on CPU (there is no DirectML path).
+- **Intel Macs**: Not supported. Transformers 5 needs `torch>=2.5`, and PyTorch's last x86_64 macOS build is 2.2.2.
 - **RAM / VRAM**: Depends on Transformers + model weights; allow several GB free.
 - **Disk**: Model weights download from Hugging Face on first load unless already cached.
 - **Gradio**: `>=6.0.0,<7` — tested against **6.11.0**. Gradio 6 is required for `launch(theme=...)` support and generator-based streaming (incremental `yield` updates in the UI). Gradio 7 is not yet tested and is excluded to prevent silent API breakage.
@@ -47,7 +48,7 @@ Open the URL printed in the terminal (default Gradio port is **7860** unless ano
 ## Pinokio
 
 1. Open this repo in Pinokio.
-2. **Install** — installs `app/requirements.txt` into the `env` venv and runs `torch.js` for PyTorch.
+2. **Install** — runs `torch.js` for PyTorch, then installs `app/requirements.txt` into the `env` venv.
 3. **Start** — runs `python app/app.py` and watches the log for a local `http://...` URL; **Open Web UI** appears when Pinokio captures it.
 
 **Sanity-check launcher scripts** (from repo root):

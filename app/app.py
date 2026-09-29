@@ -428,7 +428,7 @@ with gr.Blocks(title="LFM2.5-VL-450M") as demo:
             repetition_penalty_input,
         ],
         outputs=[output_text, status_text],
-        show_progress=True,
+        show_progress="full",
         api_name="generate",
     )
 

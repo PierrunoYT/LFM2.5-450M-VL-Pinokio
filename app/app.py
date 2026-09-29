@@ -166,11 +166,16 @@ def _video_filepath(val: object) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+# The queue runs one job at a time, so a URL that never answers would block
+# every other request behind it.
+_IMAGE_URL_TIMEOUT_S = 30.0
+
+
 def _resolve_image(image_path: Optional[str], image_url: str) -> Image.Image:
     if image_path:
         return load_image(image_path)
     if image_url and image_url.strip():
-        return load_image(image_url.strip())
+        return load_image(image_url.strip(), timeout=_IMAGE_URL_TIMEOUT_S)
     raise ValueError("Provide an uploaded image or a valid image URL.")
 
 
